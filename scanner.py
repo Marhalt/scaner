@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', nargs='?', default=None)
     parser.add_argument('-llm', action='store_true', help='Use LLM to repair U+FFFD replacement characters')
+    parser.add_argument('-save', action='store_true', help='Save files even if more than 5 weird characters remain')
     args = parser.parse_args()
 
     directory = args.directory
@@ -115,6 +116,7 @@ def main():
             content = content.replace(old, new)
 
         # LLM repair of U+FFFD replacement characters
+        llm_repaired = False
         if args.llm and REPLACEMENT_CHAR in content:
             lines = content.split('\n')
             repaired_lines = []
@@ -125,6 +127,7 @@ def main():
                         repaired = repair_line_with_llm(line)
                         print(f"{filename}: LLM repaired to: {repaired[:120]!r}")
                         repaired_lines.append(repaired)
+                        llm_repaired = True
                     except Exception as e:
                         print(f"{filename}: LLM error - {e}")
                         repaired_lines.append(line)
@@ -148,12 +151,12 @@ def main():
             for char in sorted(weird_chars, key=ord):
                 print(f"{filename}: Found {repr(char)} (ord={ord(char)})")
 
-        # If modified and not corrupted, write back the cleaned content
-        if modified and weird_count <= 5:
+        # Save if: few weird chars remain, LLM made repairs, or -save flag is set
+        if modified and (weird_count <= 5 or llm_repaired or args.save):
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f"{filename}: Cleaned and saved")
-        elif modified and weird_count > 5:
+        elif modified:
             print(f"{filename}: Skipped - needs human review")
 
 if __name__ == "__main__":
