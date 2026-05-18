@@ -97,7 +97,13 @@ def main():
         '˜': '',
     }
 
+    count_total = 0
+    count_cleaned = 0
+    count_skipped = 0
+    count_unreadable = 0
+
     for filename in txt_files:
+        count_total += 1
         filepath = os.path.join(directory, filename)
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -108,6 +114,7 @@ def main():
                     content = f.read()
             except UnicodeDecodeError:
                 print(f"{filename}: Could not decode")
+                count_unreadable += 1
                 continue
 
         # Apply replacements for non-standard characters
@@ -156,8 +163,12 @@ def main():
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f"{filename}: Cleaned and saved")
+            count_cleaned += 1
         elif modified:
             print(f"{filename}: Skipped - needs human review")
+            count_skipped += 1
+
+    print(f"\nDone. {count_total} files scanned: {count_cleaned} cleaned, {count_skipped} need review, {count_unreadable} unreadable.")
 
 if __name__ == "__main__":
     main()
