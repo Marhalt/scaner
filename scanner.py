@@ -1,10 +1,15 @@
 import os
 import string
 import argparse
+import unicodedata
 import requests
 
 REPLACEMENT_CHAR = '�'
 LM_STUDIO_URL = 'http://localhost:1234/v1/chat/completions'
+
+def strip_diacritics(text):
+    normalized = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
 
 def repair_line_with_llm(line):
     prompt = (
@@ -27,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', nargs='?', default=None)
     parser.add_argument('-llm', action='store_true', help='Use LLM to repair U+FFFD replacement characters')
-    parser.add_argument('-save', action='store_true', help='Save files even if more than 5 weird characters remain')
+    parser.add_argument('-save', action='store_true', help='Save all modified files in place, skip weird/ routing')
     args = parser.parse_args()
 
     directory = args.directory
@@ -95,11 +100,33 @@ def main():
         '″': '"',
         '╔': '',
         '˜': '',
+        'ô': '"',
+        'ö': '"',
+        'Ē': '"',
+        'Â': '',
+        'ĺ': "'",
+        'Ĺ': "'",
+        'Æ': "'",
+        'Ł': '$',
+        'í': "'",
+        'ó': '...',
+        'É': '...',
+        'Ň': '"',
+        'Ó': '"',
+        'Ő': "'",
+        '¹': "'",
+        'ů': '--',
+        '½': '1/2',
+        '¼': '1/4',
+        '¾': '3/4',
+        '÷': '/',
     }
+
+    weird_dir = os.path.join(directory, 'weird')
 
     count_total = 0
     count_cleaned = 0
-    count_skipped = 0
+    count_weird = 0
     count_unreadable = 0
 
     for filename in txt_files:
@@ -121,6 +148,9 @@ def main():
         original_content = content
         for old, new in replacements.items():
             content = content.replace(old, new)
+
+        # Strip diacritics from remaining accented Latin characters (e→e, â→a, etc.)
+        content = strip_diacritics(content)
 
         # LLM repair of U+FFFD replacement characters
         llm_repaired = False
@@ -153,22 +183,22 @@ def main():
                 weird_count += 1
 
         if weird_chars:
-            if weird_count > 5:
-                print(f"\033[91m{filename}: CORRUPTED - Found {weird_count} weird characters\033[0m")
+            print(f"\033[91m{filename}: {weird_count} unresolved characters\033[0m")
             for char in sorted(weird_chars, key=ord):
-                print(f"{filename}: Found {repr(char)} (ord={ord(char)})")
+                print(f"  {repr(char)} (U+{ord(char):04X})")
 
-        # Save if: few weird chars remain, LLM made repairs, or -save flag is set
-        if modified and (weird_count <= 5 or llm_repaired or args.save):
+        if weird_count > 0 and not args.save:
+            os.makedirs(weird_dir, exist_ok=True)
+            with open(os.path.join(weird_dir, filename), 'w', encoding='utf-8') as f:
+                f.write(content)
+            count_weird += 1
+        elif modified:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f"{filename}: Cleaned and saved")
             count_cleaned += 1
-        elif modified:
-            print(f"{filename}: Skipped - needs human review")
-            count_skipped += 1
 
-    print(f"\nDone. {count_total} files scanned: {count_cleaned} cleaned, {count_skipped} need review, {count_unreadable} unreadable.")
+    print(f"\nDone. {count_total} files scanned: {count_cleaned} cleaned, {count_weird} moved to weird/, {count_unreadable} unreadable.")
 
 if __name__ == "__main__":
     main()
