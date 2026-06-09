@@ -201,7 +201,7 @@ def main():
         weird_chars = set()
         weird_count = 0
         for char in content:
-            if ord(char) > 127 and not char.isalnum():
+            if ord(char) > 127:
                 weird_chars.add(char)
                 weird_count += 1
 
