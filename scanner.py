@@ -7,6 +7,19 @@ import requests
 REPLACEMENT_CHAR = '�'
 LM_STUDIO_URL = 'http://localhost:1234/v1/chat/completions'
 
+def fix_cp1252_controls(text):
+    result = []
+    for c in text:
+        code = ord(c)
+        if 0x80 <= code <= 0x9F:
+            try:
+                result.append(bytes([code]).decode('cp1252'))
+            except (ValueError, UnicodeDecodeError):
+                result.append('')
+        else:
+            result.append(c)
+    return ''.join(result)
+
 def strip_diacritics(text):
     normalized = unicodedata.normalize('NFKD', text)
     return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
@@ -33,6 +46,7 @@ def main():
     parser.add_argument('directory', nargs='?', default=None)
     parser.add_argument('-llm', action='store_true', help='Use LLM to repair U+FFFD replacement characters')
     parser.add_argument('-save', action='store_true', help='Save all modified files in place, skip weird/ routing')
+    parser.add_argument('-force', action='store_true', help='Replace all remaining non-ASCII characters with a space')
     args = parser.parse_args()
 
     directory = args.directory
@@ -103,6 +117,7 @@ def main():
         'ô': '"',
         'ö': '"',
         'Ē': '"',
+        '›': "'",
         'Â': '',
         'ĺ': "'",
         'Ĺ': "'",
@@ -123,6 +138,7 @@ def main():
     }
 
     weird_dir = os.path.join(directory, 'weird')
+    clean_dir = os.path.join(directory, 'clean')
 
     count_total = 0
     count_cleaned = 0
@@ -144,8 +160,11 @@ def main():
                 count_unreadable += 1
                 continue
 
-        # Apply replacements for non-standard characters
+        # Decode C1 control characters as Windows-1252 before other processing
         original_content = content
+        content = fix_cp1252_controls(content)
+
+        # Apply replacements for non-standard characters
         for old, new in replacements.items():
             content = content.replace(old, new)
 
@@ -172,6 +191,10 @@ def main():
                     repaired_lines.append(line)
             content = '\n'.join(repaired_lines)
 
+        # Force-replace any remaining non-ASCII with a space
+        if args.force:
+            content = ''.join(c if ord(c) <= 127 else ' ' for c in content)
+
         # Check if content was modified
         modified = content != original_content
 
@@ -187,15 +210,17 @@ def main():
             for char in sorted(weird_chars, key=ord):
                 print(f"  {repr(char)} (U+{ord(char):04X})")
 
-        if weird_count > 0 and not args.save:
+        if weird_count > 0 and not args.save and not args.force:
             os.makedirs(weird_dir, exist_ok=True)
             with open(os.path.join(weird_dir, filename), 'w', encoding='utf-8') as f:
                 f.write(content)
             count_weird += 1
-        elif modified:
-            with open(filepath, 'w', encoding='utf-8') as f:
+        else:
+            os.makedirs(clean_dir, exist_ok=True)
+            with open(os.path.join(clean_dir, filename), 'w', encoding='utf-8') as f:
                 f.write(content)
-            print(f"{filename}: Cleaned and saved")
+            if modified:
+                print(f"{filename}: Cleaned and saved to clean/")
             count_cleaned += 1
 
     print(f"\nDone. {count_total} files scanned: {count_cleaned} cleaned, {count_weird} moved to weird/, {count_unreadable} unreadable.")
